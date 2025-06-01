@@ -1,5 +1,7 @@
 package study.data_jpa.repository;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,8 +10,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+//import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+//import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 import study.data_jpa.dto.MemberDto;
@@ -32,7 +34,10 @@ class MemberRepositoryTest {
     @Autowired
     TeamRepository teamRepository;
 
-    private static PasswordEncoder encoder = new BCryptPasswordEncoder();
+    @PersistenceContext
+    EntityManager em;
+
+    //private static PasswordEncoder encoder = new BCryptPasswordEncoder();
 
     @Test
     public void testMember() {
@@ -47,7 +52,7 @@ class MemberRepositoryTest {
 
     @Test
     public void testSetPassword() {
-        String password = encoder.encode("1234");
+        String password = "1234"; //encoder.encode("1234");
         Member member = new Member("memberA", password, "A");
 
         Member savedMember = memberRepository.save(member);
@@ -210,4 +215,106 @@ class MemberRepositoryTest {
         assertThat(page.isFirst()).isTrue();
         assertThat(page.hasNext()).isTrue();
     }*/
+
+    @Test
+    public void bulkUpdateAge() {
+        memberRepository.save(new Member("member1", 10));
+        memberRepository.save(new Member("member2", 11));
+        memberRepository.save(new Member("member3", 20));
+        memberRepository.save(new Member("member4", 21));
+        memberRepository.save(new Member("member5", 40));
+
+        // Bulk 업데이트는 영속성 컨텍스를 무시하고 db에 바로 반영시킴.
+        // 영속성 컨텍스트에는 업데이트 이전 데이터로 남아있다.
+        // 그래서 Bulk연산 이후에는 영속성 컨텍스트에 있는 값을 DB에 반영한다/날린다.(em.flush, em.clear)
+        int result = memberRepository.bulkAgePlus(20);
+
+        //em.flush();
+        //em.clear();
+
+        Member member5 = memberRepository.findByUsername("member5");
+        System.out.println(member5.toString());
+
+        assertThat(result).isEqualTo(3);
+    }
+
+    @Test
+    public void findMemberLazy() {
+        Team teamA = new Team("teamA");
+        Team teamB = new Team("teamB");
+
+        teamRepository.save(teamA);
+        teamRepository.save(teamB);
+
+        Member member1 = new Member("member1", 10, teamA);
+        Member member2 = new Member("member2", 20, teamB);
+        Member member3 = new Member("member3", 30, teamB);
+
+        memberRepository.save(member1);
+        memberRepository.save(member2);
+        memberRepository.save(member3);
+
+        em.flush();
+        em.clear();
+
+        List<Member> members = memberRepository.findEntityGraphByUsername("member1");
+        for (Member member : members) {
+            System.out.println("member.getUsername() = " + member.getUsername());
+            System.out.println("member.getTeam() = " + member.getTeam().getName());
+        }
+    }
+
+    @Test
+    public void queryHint() {
+        Member member1 = new Member("member1", 10);
+        memberRepository.save(member1);
+
+        em.flush();
+        em.clear();
+
+        Member findMember = memberRepository.findReadOnlyByUsername("member1");
+        findMember.setUsername("member2");
+
+        // 변경감지
+        // 원본을 가지고 변경할 데이터를 비교하기 때문에 작업시 추가 비용이 든다.
+        // QueryHint에서 readOnly를 사용하면 별도 스냅샷을 만들지 않는다.
+        em.flush();
+    }
+
+    @Test
+    public void queryLock() {
+        Member member1 = new Member("member1", 10);
+        memberRepository.save(member1);
+
+        em.flush();
+        em.clear();
+
+        // select for update
+        List<Member> findMember = memberRepository.findLockByUsername("member1");
+    }
+
+    @Test
+    public void callCustom() {
+        List<Member> result = memberRepository.findMemberCustom();
+    }
+
+    @Test
+    public void testJpaBaseEntity() throws Exception {
+        Member member = new Member("member1");
+        memberRepository.save(member);
+
+        Thread.sleep(100);
+
+        member.setUsername("member2");
+
+        em.flush();
+        em.clear();
+
+        Member findMember = memberRepository.findById(member.getId()).get();
+
+        System.out.println("findMember.getCreatedDate() = " + findMember.getCreatedDate());
+        System.out.println("findMember.getModifiedDate() = " + findMember.getModifiedDate());
+        System.out.println("findMember.getCreatedBy() = " + findMember.getCreatedBy());
+        System.out.println("findMember.getModifiedBy() = " + findMember.getModifiedBy());
+    }
 }
