@@ -48,12 +48,12 @@ public class MemberController {
         return pageMap;
     }
 
-    @PostConstruct // Spring Applcation 이 올라올 때 한번 실행됨
+    /*@PostConstruct // Spring Applcation 이 올라올 때 한번 실행됨
     public void init() {
         //memberRepository.save(new Member("userA"));
 
         for (int i = 0; i < 100; i++) {
             memberRepository.save(new Member("user" + i, i));
         }
-    }
+    }*/
 }
