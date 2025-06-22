@@ -1,7 +1,11 @@
 package study.data_jpa.querydsl;
 
+import com.querydsl.core.QueryResults;
+import com.querydsl.core.Tuple;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,10 +14,15 @@ import org.springframework.test.annotation.Rollback;
 import org.springframework.transaction.annotation.Transactional;
 import study.data_jpa.entity.Member;
 import study.data_jpa.entity.QMember;
+import study.data_jpa.entity.QTeam;
 import study.data_jpa.entity.Team;
+
+import java.io.IOException;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static study.data_jpa.entity.QMember.member;
+import static study.data_jpa.entity.QTeam.*;
 
 @SpringBootTest
 @Transactional
@@ -89,5 +98,156 @@ public class QueryDslTest {
                 .fetchOne();
 
         assertThat(findMember.getUsername()).isEqualTo("member1");
+    }
+
+    @Test
+    void fetch() {
+        /*QueryResults<Member> results = queryFactory
+                .selectFrom(member)
+                .fetchResults()
+                ;*/
+
+        List<Member> resultList = queryFactory
+                .selectFrom(member)
+                .fetch();
+    }
+
+    /*
+     * 정렬 순서
+     * 1. 회원 나이 내림차순(Desc)
+     * 2. 회원 이름 오름차순(Asc)
+     * 단, 2에서 회원 이름이 없으면 마지막에 출력(nulls last)
+     * */
+    @Test
+    void sort() {
+        em.persist(new Member(null, 100));
+        em.persist(new Member("member5", 100));
+        em.persist(new Member("member6", 100));
+
+        List<Member> memberList = queryFactory
+                .selectFrom(member)
+                .where(member.age.eq(100))
+                .orderBy(member.age.desc(), member.username.asc().nullsLast())
+                .fetch();
+
+        for (Member member1 : memberList) {
+            System.out.println("member1 = " + member1);
+        }
+    }
+
+    // 페이징
+    @Test
+    void paging1() {
+        List<Member> memberList = queryFactory
+                .selectFrom(member)
+                .orderBy(member.username.desc())
+                .offset(1)
+                .limit(2)
+                .fetch();
+
+        assertThat(memberList.size()).isEqualTo(2);
+    }
+
+    // 집합
+    @Test
+    void aggregation() {
+        List<Tuple> result = queryFactory
+                .select(
+                        member.count(),
+                        member.age.sum(),
+                        member.age.avg(),
+                        member.age.max(),
+                        member.age.min()
+                )
+                .from(member)
+                .fetch();
+
+        Tuple tuple = result.get(0);
+        assertThat(tuple.get(member.count())).isEqualTo(4);
+        assertThat(tuple.get(member.age.sum())).isEqualTo(100);
+    }
+
+    /*
+     * 팀의 이름과 각 팀의 평균 연령 구하기
+     * */
+    @Test
+    void group() throws IOException {
+        List<Tuple> fetch = queryFactory
+                .select(team.name, member.age.avg())
+                .from(member)
+                .join(member.team, team)
+                .groupBy(team.name)
+                .fetch();
+
+        for (Tuple tuple : fetch) {
+            System.out.println("tuple = " + tuple);
+        }
+    }
+
+    @Test
+    void defaultJoin() {
+        List<Member> result = queryFactory
+                .selectFrom(member)
+                .join(member.team, team)
+                .where(team.name.eq("teamA"))
+                .fetch();
+
+        assertThat(result)
+                .extracting("username")
+                .containsExactly("member1", "member2")
+        ;
+    }
+
+    /*
+     * 예) 화원과 팀을 조인하면서, 팀 이름이 teamA인 팀만 조인, 회원은 모두 조회
+     * */
+    @Test
+    void join_on_filtering() {
+        List<Tuple> result = queryFactory
+                .select(member, team)
+                .from(member)
+                .leftJoin(member.team, team)
+                .on(team.name.eq("teamA"))
+                .fetch();
+
+        for (Tuple tuple : result) {
+            System.out.println("tuple = " + tuple);
+        }
+    }
+
+    @PersistenceUnit
+    EntityManagerFactory emf;
+
+    @Test
+    void fetchJoinNoTest() {
+        em.flush();
+        em.clear();
+
+        Member member = queryFactory
+                .selectFrom(QMember.member)
+                .where(QMember.member.username.eq("member1"))
+                .fetchOne();
+
+        // 지연 로딩에 따른 team 엔티티가 로딩이 되었는지 확인. 지연로딩 설정이 되어있기 때문에 false
+        boolean loaded = emf.getPersistenceUnitUtil().isLoaded(member.getTeam());
+
+        assertThat(loaded).isFalse();
+    }
+
+    @Test
+    void fetchJoinUseTest() {
+        em.flush();
+        em.clear();
+
+        Member result = queryFactory
+                .selectFrom(member)
+                .join(member.team, team).fetchJoin() /* fetchJoin 추가해주면 team 엔티티도 같이 조회 */
+                .where(QMember.member.username.eq("member1"))
+                .fetchOne();
+
+        // 지연 로딩에 따른 team 엔티티가 로딩이 되었는지 확인. 지연로딩 설정이 되어있기 때문에 false
+        boolean loaded = emf.getPersistenceUnitUtil().isLoaded(result.getTeam());
+
+        assertThat(loaded).isTrue();
     }
 }
